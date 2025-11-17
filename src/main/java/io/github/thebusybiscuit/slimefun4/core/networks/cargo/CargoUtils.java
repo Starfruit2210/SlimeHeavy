@@ -5,6 +5,8 @@ import java.util.Map;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import io.github.thebusybiscuit.slimefun4.api.items.SlimefunItem;
+import io.github.thebusybiscuit.slimefun4.core.attributes.DistinctiveItem;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.Tag;
@@ -244,6 +246,30 @@ final class CargoUtils {
         return null;
     }
 
+    private static boolean canStackConsideringDistinctive(@Nonnull ItemStack existing,
+                                                          @Nonnull ItemStack incoming) {
+        // Pertama: harus "similar" secara umum
+        if (!SlimefunUtils.isItemSimilar(existing, incoming, true, false)) {
+            return false;
+        }
+
+        // Cek sisi existing
+        SlimefunItem sfExisting = SlimefunItem.getByItem(existing);
+        if (sfExisting instanceof DistinctiveItem distinctive) {
+            if (!distinctive.canStack(existing.getItemMeta(), incoming.getItemMeta())) {
+                return false; // FIX: hormati aturan stacking khusus
+            }
+        }
+
+        // Cek sisi incoming (kalau item incoming yang menentukan)
+        SlimefunItem sfIncoming = SlimefunItem.getByItem(incoming);
+        if (sfIncoming instanceof DistinctiveItem distinctiveIncoming) {
+            return distinctiveIncoming.canStack(incoming.getItemMeta(), existing.getItemMeta()); // FIX: hormati aturan stacking khusus
+        }
+
+        return true;
+    }
+
     @Nullable
     static ItemStack insert(AbstractItemNetwork network, Map<Location, Inventory> inventories, Block node, Block target, boolean smartFill, ItemStack stack, ItemStackWrapper wrapper) {
         Debug.log(TestCase.CARGO_INPUT_TESTING, "CargoUtils#insert");
@@ -285,11 +311,15 @@ final class CargoUtils {
             int currentAmount = itemInSlot.getAmount();
 
             if (!smartFill && currentAmount == maxStackSize) {
-                // Skip full stacks - Performance optimization for non-smartfill nodes
                 continue;
             }
 
-            if (SlimefunUtils.isItemSimilar(itemInSlot, wrapper, true, false)) {
+            // BEFORE:
+            // if (SlimefunUtils.isItemSimilar(itemInSlot, wrapper, true, false)) {
+
+            // AFTER (FIX): unwrap wrapper menjadi ItemStack lalu hormati DistinctiveItem
+            ItemStack incoming = wrapper instanceof ItemStack ? (ItemStack) wrapper : stack;
+            if (canStackConsideringDistinctive(itemInSlot, incoming)) { // FIX
                 if (currentAmount < maxStackSize) {
                     int amount = currentAmount + stack.getAmount();
 
@@ -327,7 +357,6 @@ final class CargoUtils {
         int maxSlot = range[1];
 
         for (int slot = minSlot; slot < maxSlot; slot++) {
-            // Changes to this ItemStack are synchronized with the Item in the Inventory
             ItemStack itemInSlot = contents[slot];
 
             if (itemInSlot == null) {
@@ -338,11 +367,12 @@ final class CargoUtils {
                 int maxStackSize = itemInSlot.getType().getMaxStackSize();
 
                 if (!smartFill && currentAmount == maxStackSize) {
-                    // Skip full stacks - Performance optimization for non-smartfill nodes
                     continue;
                 }
 
-                if (SlimefunUtils.isItemSimilar(itemInSlot, wrapper, true, false)) {
+                // AFTER (FIX): hormati DistinctiveItem; un-wrap wrapper ke ItemStack
+                ItemStack incoming = wrapper instanceof ItemStack ? (ItemStack) wrapper : stack;
+                if (canStackConsideringDistinctive(itemInSlot, incoming)) { // FIX
                     if (currentAmount < maxStackSize) {
                         int amount = currentAmount + stack.getAmount();
 

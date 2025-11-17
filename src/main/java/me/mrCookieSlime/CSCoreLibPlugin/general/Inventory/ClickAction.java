@@ -1,5 +1,7 @@
 package me.mrCookieSlime.CSCoreLibPlugin.general.Inventory;
 
+import org.bukkit.event.Cancellable;
+
 /**
  * An old remnant of CS-CoreLib.
  * This will be removed once we updated everything.
@@ -7,20 +9,32 @@ package me.mrCookieSlime.CSCoreLibPlugin.general.Inventory;
  */
 public class ClickAction {
 
-    private boolean right;
-    private boolean shift;
+    private final boolean right;
+    private final boolean left;
+    private final boolean shift;
+    private final boolean shiftRight;
 
-    public ClickAction(boolean rightClicked, boolean shiftClicked) {
+    public ClickAction(boolean rightClicked, boolean leftClicked, boolean shiftClicked, boolean shiftRightClicked) {
         this.right = rightClicked;
+        this.left = leftClicked;
         this.shift = shiftClicked;
+        this.shiftRight = shiftRightClicked;
     }
 
     public boolean isRightClicked() {
         return right;
     }
 
+    public boolean isLeftClicked() {
+        return left;
+    }
+
     public boolean isShiftClicked() {
         return shift;
+    }
+
+    public boolean isShiftRightClicked() {
+        return shiftRight;
     }
 
 }

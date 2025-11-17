@@ -1,9 +1,7 @@
 package io.github.thebusybiscuit.slimefun4.implementation.items.androids;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Predicate;
 import java.util.logging.Level;
 
@@ -73,6 +71,25 @@ public class ProgrammableAndroid extends SlimefunItem implements InventoryBlock,
     protected final List<MachineFuel> fuelTypes = new ArrayList<>();
     protected final String texture;
     private final int tier;
+
+    private final Map<BlockFace, BlockData> CACHED_HEAD_DATA = initCache();
+    private final Map<Block, Float> fuelCache = new HashMap<>();
+
+    private final Map<String, String[]> SCRIPT_CACHE = new ConcurrentHashMap<>();
+    private final Map<String, Instruction[]> INSTRUCTION_CACHE = new ConcurrentHashMap<>();
+
+    private Map<BlockFace, BlockData> initCache() {
+        Map<BlockFace, BlockData> map = new EnumMap<>(BlockFace.class);
+        for (BlockFace face : POSSIBLE_ROTATIONS) {
+            BlockData data = Material.PLAYER_HEAD.createBlockData(datas -> {
+                if (datas instanceof Rotatable rotatable) {
+                    rotatable.setRotation(face.getOppositeFace());
+                }
+            });
+            map.put(face, data);
+        }
+        return Collections.unmodifiableMap(map);
+    }
 
     @ParametersAreNonnullByDefault
     public ProgrammableAndroid(ItemGroup itemGroup, int tier, SlimefunItemStack item, RecipeType recipeType, ItemStack[] recipe) {
@@ -176,6 +193,8 @@ public class ProgrammableAndroid extends SlimefunItem implements InventoryBlock,
                     e.setCancelled(true);
                     return;
                 }
+
+                fuelCache.remove(b);
 
                 BlockMenu inv = BlockStorage.getInventory(b);
 
@@ -670,43 +689,88 @@ public class ProgrammableAndroid extends SlimefunItem implements InventoryBlock,
         return tier;
     }
 
-    protected void tick(Block b, Config data) {
-        if (b.getType() != Material.PLAYER_HEAD) {
-            // The Android was destroyed or moved.
+    protected void tick(Block block, Config data) {
+        if (block.getType() != Material.PLAYER_HEAD) {
+            fuelCache.remove(block);
             return;
         }
 
-        if ("false".equals(data.getString("paused"))) {
-            BlockMenu menu = BlockStorage.getInventory(b);
-
-            String fuelData = data.getString("fuel");
-            float fuel = fuelData == null ? 0 : Float.parseFloat(fuelData);
-
-            if (fuel < 0.001) {
-                consumeFuel(b, menu);
-            } else {
-                String code = data.getString("script");
-                String[] script = CommonPatterns.DASH.split(code == null ? DEFAULT_SCRIPT : code);
-
-                String indexData = data.getString("index");
-                int index = (indexData == null ? 0 : Integer.parseInt(indexData)) + 1;
-
-                if (index >= script.length) {
-                    index = 0;
-                }
-
-                BlockStorage.addBlockInfo(b, "fuel", String.valueOf(fuel - 1));
-                Instruction instruction = Instruction.getInstruction(script[index]);
-
-                if (instruction == null) {
-                    Slimefun.instance().getLogger().log(Level.WARNING, "Failed to parse Android instruction: {0}, maybe your server is out of date?", script[index]);
-                    return;
-                }
-
-                executeInstruction(instruction, b, menu, data, index);
+        if (!"false".equals(data.getString("paused"))) {
+            String rawPausedFuel = data.getString("fuel");
+            if (rawPausedFuel != null && !rawPausedFuel.isEmpty()) {
+                try {
+                    float pausedFuel = Float.parseFloat(rawPausedFuel);
+                    fuelCache.put(block, pausedFuel);
+                } catch (NumberFormatException ignored) {}
             }
+            return;
         }
+
+        BlockMenu menu = BlockStorage.getInventory(block);
+
+        // 1) Ambil fuel awal
+        String raw = data.getString("fuel");
+        float storedFuel = 0f;
+
+        if (raw != null) storedFuel = Float.parseFloat(raw);
+
+        float fuel = fuelCache.getOrDefault(block, storedFuel);
+
+        // 2) Kalau habis, coba isi dulu
+        if (fuel < 0.001f) {
+            int loaded = consumeFuel(block, menu);
+            if (loaded <= 0) {
+                // tidak ada bahan bakar, berhenti di tick ini
+                return;
+            }
+            fuel = loaded;
+        }
+
+        // 3) Ambil & advance script index
+        String code = data.getString("script");
+        if (code == null || code.isEmpty()) {
+            code = DEFAULT_SCRIPT;
+        }
+
+        // ambil dari cache
+        String[] script = SCRIPT_CACHE.computeIfAbsent(code, CommonPatterns.DASH::split);
+
+        String indexData = data.getString("index");
+        int index = (indexData == null ? 0 : Integer.parseInt(indexData)) + 1;
+        if (index >= script.length) {
+            index = 0;
+        }
+
+        // 4) Kurangi fuel & simpan ke cache
+        fuel -= 1f;
+        fuelCache.put(block, fuel);
+
+        // 5) Persist hemat I/O: tiap 20 tick atau mendekati habis
+        if (fuel <= 1f || (((int) fuel) % 20 == 0)) {
+            BlockStorage.addBlockInfo(block, "fuel", String.valueOf(fuel));
+        }
+
+        // 6) Eksekusi instruksi
+        Instruction[] instructions = INSTRUCTION_CACHE.computeIfAbsent(code, c -> {
+            String[] parts = CommonPatterns.DASH.split(c);
+            Instruction[] result = new Instruction[parts.length];
+            for (int i = 0; i < parts.length; i++) {
+                result[i] = Instruction.getInstruction(parts[i]);
+            }
+            return result;
+        });
+
+        Instruction instruction = instructions[index];
+        if (instruction == null) {
+            Slimefun.instance().getLogger().log(Level.WARNING,
+                    "Failed to parse Android instruction: {0}, maybe your server is out of date?", script[index]);
+            return;
+        }
+
+        BlockStorage.addBlockInfo(block, "index", String.valueOf(index));
+        executeInstruction(instruction, block, menu, data, index);
     }
+
 
     @ParametersAreNonnullByDefault
     private void executeInstruction(Instruction instruction, Block b, BlockMenu inv, Config data, int index) {
@@ -740,25 +804,51 @@ public class ProgrammableAndroid extends SlimefunItem implements InventoryBlock,
     }
 
     protected void rotate(Block b, BlockFace current, int mod) {
-        int index = POSSIBLE_ROTATIONS.indexOf(current) + mod;
+        final int size = POSSIBLE_ROTATIONS.size();
+        int index = Math.floorMod(POSSIBLE_ROTATIONS.indexOf(current) + mod, size);
+        BlockFace next = POSSIBLE_ROTATIONS.get(index);
 
-        if (index == POSSIBLE_ROTATIONS.size()) {
-            index = 0;
-        } else if (index < 0) {
-            index = POSSIBLE_ROTATIONS.size() - 1;
+        BlockData existing = b.getBlockData();
+
+        // Pastikan tipe block benar (tanpa physics)
+        if (!(existing instanceof Rotatable)) {
+            if (b.getType() != Material.PLAYER_HEAD) {
+                b.setType(Material.PLAYER_HEAD, false);
+                existing = b.getBlockData();
+            }
         }
 
-        BlockFace rotation = POSSIBLE_ROTATIONS.get(index);
+        // Build target safely (tanpa cast keras)
+        BlockData target = existing.clone();
+        if (target instanceof Rotatable r) {
+            r.setRotation(next.getOppositeFace());
+        } else {
+            // Fallback untuk environment tanpa Rotatable (MockBukkit)
+            target = Material.PLAYER_HEAD.createBlockData(d -> {
+                if (d instanceof Rotatable r2) r2.setRotation(next.getOppositeFace());
+            });
+        }
 
-        BlockData blockData = Material.PLAYER_HEAD.createBlockData(data -> {
-            if (data instanceof Rotatable rotatable) {
-                rotatable.setRotation(rotation.getOppositeFace());
+        // Skip update kalau tidak berubah
+        if (existing.equals(target)) {
+            String stored = BlockStorage.getLocationInfo(b.getLocation(), "rotation");
+            if (stored == null || !stored.equals(next.name())) {
+                BlockStorage.addBlockInfo(b, "rotation", next.name());
             }
-        });
+            return;
+        }
 
-        b.setBlockData(blockData);
-        BlockStorage.addBlockInfo(b, "rotation", rotation.name());
+        // Optional: pakai cache kalau tersedia
+        BlockData cached = CACHED_HEAD_DATA.get(next);
+        BlockData toSet = (cached != null) ? cached.clone() : target;
+
+        b.setBlockData(toSet, false);
+        String stored = BlockStorage.getLocationInfo(b.getLocation(), "rotation");
+        if (stored == null || !stored.equals(next.name())) {
+            BlockStorage.addBlockInfo(b, "rotation", next.name());
+        }
     }
+
 
     protected void depositItems(BlockMenu menu, Block facedBlock) {
         if (facedBlock.getType() == Material.DISPENSER && BlockStorage.check(facedBlock, "ANDROID_INTERFACE_ITEMS")) {
@@ -819,7 +909,7 @@ public class ProgrammableAndroid extends SlimefunItem implements InventoryBlock,
     }
 
     @ParametersAreNonnullByDefault
-    private void consumeFuel(Block b, BlockMenu menu) {
+    private int consumeFuel(Block b, BlockMenu menu) {
         ItemStack item = menu.getItemInSlot(43);
 
         if (item != null && item.getType() != Material.AIR) {
@@ -833,10 +923,12 @@ public class ProgrammableAndroid extends SlimefunItem implements InventoryBlock,
 
                     int fuelLevel = fuel.getTicks();
                     BlockStorage.addBlockInfo(b, "fuel", String.valueOf(fuelLevel));
-                    break;
+                    fuelCache.put(b, (float) fuelLevel);
+                    return fuelLevel;
                 }
             }
         }
+        return 0;
     }
 
     private void constructMenu(@Nonnull BlockMenuPreset preset) {

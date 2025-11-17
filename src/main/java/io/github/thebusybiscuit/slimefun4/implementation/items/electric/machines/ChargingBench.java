@@ -1,5 +1,6 @@
 package io.github.thebusybiscuit.slimefun4.implementation.items.electric.machines;
 
+import io.github.thebusybiscuit.slimefun4.utils.SlimefunUtils;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.inventory.ItemStack;
@@ -57,28 +58,42 @@ public class ChargingBench extends AContainer {
     private boolean charge(Block b, BlockMenu inv, int slot, ItemStack item) {
         SlimefunItem sfItem = SlimefunItem.getByItem(item);
 
+        if (sfItem == null) {
+            return moveToOutput(inv, slot, item);
+        }
+
+        if (!SlimefunUtils.isItemSimilar(item, sfItem.getItem(), false, true, true)) {
+            return false; // biarkan slot ini, lanjut slot lain
+        }
+
         if (sfItem instanceof Rechargeable rechargeable) {
             float charge = getEnergyConsumption() / 2F;
 
             if (rechargeable.addItemCharge(item, charge)) {
                 removeCharge(b.getLocation(), getEnergyConsumption());
-            } else if (inv.fits(item, getOutputSlots())) {
-                inv.pushItem(item, getOutputSlots());
-                inv.replaceExistingItem(slot, null);
+                return true;
+            } else {
+                return moveToOutput(inv, slot, item);
             }
-
-            return true;
-        } else if (sfItem != null && inv.fits(item, getOutputSlots())) {
-            inv.pushItem(item, getOutputSlots());
-            inv.replaceExistingItem(slot, null);
         }
 
-        return false;
+        return moveToOutput(inv, slot, item);
     }
 
     @Override
     public String getMachineIdentifier() {
         return "CHARGING_BENCH";
+    }
+
+    private boolean moveToOutput(BlockMenu inv, int slot, ItemStack ignored) {
+        ItemStack current = inv.getItemInSlot(slot);
+        if (current == null) return false;
+        if (!inv.fits(current, getOutputSlots())) return false;
+
+        ItemStack copy = current.clone();
+        inv.replaceExistingItem(slot, null);
+        inv.pushItem(copy, getOutputSlots());
+        return true;
     }
 
 }

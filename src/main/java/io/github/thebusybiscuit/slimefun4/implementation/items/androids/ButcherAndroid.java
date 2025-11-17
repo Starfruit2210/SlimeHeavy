@@ -4,6 +4,9 @@ import java.util.function.Predicate;
 
 import javax.annotation.ParametersAreNonnullByDefault;
 
+import io.github.thebusybiscuit.slimefun4.utils.compatibility.VersionedParticle;
+import org.bukkit.Location;
+import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.entity.ArmorStand;
@@ -17,6 +20,8 @@ import io.github.thebusybiscuit.slimefun4.api.items.ItemGroup;
 import io.github.thebusybiscuit.slimefun4.api.items.SlimefunItemStack;
 import io.github.thebusybiscuit.slimefun4.api.recipes.RecipeType;
 import io.github.thebusybiscuit.slimefun4.implementation.Slimefun;
+import org.bukkit.util.RayTraceResult;
+import org.bukkit.util.Vector;
 
 public class ButcherAndroid extends ProgrammableAndroid {
 
@@ -37,27 +42,46 @@ public class ButcherAndroid extends ProgrammableAndroid {
         double damage = getTier() >= 3 ? 20D : 4D * getTier();
         double radius = 4.0 + getTier();
 
-        for (Entity n : b.getWorld().getNearbyEntities(b.getLocation(), radius, radius, radius, n -> n instanceof LivingEntity livingEntity && !(n instanceof ArmorStand) && !(n instanceof Player) && n.isValid() && predicate.test(livingEntity))) {
-            // Check if our android is facing this entity.
-            boolean willAttack = switch (face) {
-                case NORTH -> n.getLocation().getZ() < b.getZ();
-                case EAST -> n.getLocation().getX() > b.getX();
-                case SOUTH -> n.getLocation().getZ() > b.getZ();
-                case WEST -> n.getLocation().getX() < b.getX();
-                default -> false;
-            };
+        double originX = b.getX() + 0.5;
+        double originY = b.getY() + 1.0;
+        double originZ = b.getZ() + 0.5;
 
-            if (willAttack) {
-                if (n.hasMetadata(METADATA_KEY)) {
-                    n.removeMetadata(METADATA_KEY, Slimefun.instance());
-                }
-
-                n.setMetadata(METADATA_KEY, new FixedMetadataValue(Slimefun.instance(), new AndroidInstance(this, b)));
-
-                ((LivingEntity) n).damage(damage);
-                break;
-            }
+        double dirX, dirY = 0.0, dirZ;
+        switch (face) {
+            case NORTH -> { dirX =  0.0; dirZ = -1.0; }
+            case SOUTH -> { dirX =  0.0; dirZ =  1.0; }
+            case WEST  -> { dirX = -1.0; dirZ =  0.0; }
+            case EAST  -> { dirX =  1.0; dirZ =  0.0; }
+            default    -> { return; }
         }
+
+        final World world = b.getWorld();
+
+        final RayTraceResult hit = world.rayTraceEntities(
+                new Location(world, originX, originY, originZ),
+                new Vector(dirX, dirY, dirZ), radius, entity -> {
+                    if (!(entity instanceof LivingEntity living)) return false;
+                    if (entity instanceof ArmorStand) return false;
+                    if (entity instanceof Player) return false;
+                    if (!entity.isValid()) return false;
+                    return predicate.test(living);
+                }
+        );
+
+        if (hit == null) return;
+
+        final Entity entityHit = hit.getHitEntity();
+        if (!(entityHit instanceof LivingEntity livingEntity)) return;
+        if (entityHit.isDead()) return;
+
+        // Attach/refresh metadata only once (no remove then set)
+        entityHit.setMetadata(METADATA_KEY,
+                new FixedMetadataValue(Slimefun.instance(), new AndroidInstance(this, b)));
+
+        livingEntity.damage(damage);
+
+        // (optional) one small particle for feedback; schedule on-region if Folia
+        world.spawnParticle(VersionedParticle.SMOKE, originX, originY + 0.25, originZ, 8, 0.5, 0.5, 0.5, 0.015);
     }
 
 }

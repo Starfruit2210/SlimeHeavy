@@ -452,7 +452,7 @@ public class BlockStorage {
         BlockStorage storage = getStorage(l.getWorld());
 
         if (storage == null) {
-            return emptyBlockData;
+            storage = getOrCreate(l.getWorld());
         }
 
         Config cfg = storage.storage.get(l);
@@ -568,8 +568,11 @@ public class BlockStorage {
         BlockStorage storage = getStorage(l.getWorld());
 
         if (storage == null) {
-            Slimefun.logger().warning("Could not set Block info for non-registered World '" + l.getWorld().getName() + "'. Is some plugin trying to store data in a fake world?");
-            return;
+            storage = getOrCreate(l.getWorld());
+            if (storage == null) {
+                Slimefun.logger().warning("Failed to (getOrCreate) BlockStorage for world '" + l.getWorld().getName() + "'");
+                return;
+            }
         }
 
         storage.storage.put(l, cfg);

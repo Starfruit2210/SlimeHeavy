@@ -331,101 +331,91 @@ public final class SlimefunUtils {
      *
      * @return True if the given {@link ItemStack}s are similar under the given constraints
      */
-    public static boolean isItemSimilar(@Nullable ItemStack item, @Nullable ItemStack sfitem, boolean checkLore, boolean checkAmount, boolean checkDistinction) {
+    public static boolean isItemSimilar(@Nullable ItemStack item,
+                                        @Nullable ItemStack sfitem,
+                                        boolean checkLore,
+                                        boolean checkAmount,
+                                        boolean checkDistinction) {
         if (item == null) {
             return sfitem == null;
         } else if (sfitem == null) {
             return false;
-        } else if (item.getType() != sfitem.getType()) {
-            return false;
-        } else if (checkAmount && item.getAmount() < sfitem.getAmount()) {
+        }
+
+        if (item.getType() != sfitem.getType()) {
             return false;
         }
-        SlimefunItem sf_sfitem = SlimefunItem.getByItem(sfitem);
-        SlimefunItem sf_item = SlimefunItem.getByItem(item);
-   
-        if (sf_sfitem != null && sf_item != null) {
-            if (!sf_sfitem.getId().equals(sf_item.getId())) {
+
+        if (checkAmount && item.getAmount() < sfitem.getAmount()) {
+            return false;
+        }
+
+        // Ambil SlimefunItem untuk KEDUA stack yang sedang dibandingkan
+        SlimefunItem slimefunOfSfitem = SlimefunItem.getByItem(sfitem);
+        SlimefunItem slimefunOfItem  = SlimefunItem.getByItem(item);
+
+        // CASE 1: Keduanya SlimefunItem
+        if (slimefunOfSfitem != null && slimefunOfItem != null) {
+            // ID harus sama
+            if (!slimefunOfSfitem.getId().equals(slimefunOfItem.getId())) {
                 return false;
             }
-            /*
-             * PR #3417
-             *
-             * Some items can't rely on just IDs matching and will implement {@link DistinctiveItem}
-             * in which case we want to use the method provided to compare
-             */
-            if (checkDistinction && sf_sfitem instanceof DistinctiveItem distinctive && sf_item instanceof DistinctiveItem) {
-                return distinctive.canStack(sf_sfitem.getItem().getItemMeta(), sf_item.getItem().getItemMeta());
+
+            // Jika DistinctiveItem, WAJIB bandingkan METADATA AKTUAL dari kedua stack
+            if (checkDistinction
+                    && slimefunOfSfitem instanceof DistinctiveItem distinctiveLeft
+                    && slimefunOfItem  instanceof DistinctiveItem) {
+                ItemMeta leftMeta  = sfitem.hasItemMeta() ? sfitem.getItemMeta() : null;
+                ItemMeta rightMeta = item.hasItemMeta()   ? item.getItemMeta()   : null;
+                if (leftMeta == null || rightMeta == null) {
+                    // kalau salah satu tidak punya meta, mereka tidak bisa di-stack
+                    return false;
+                }
+                return distinctiveLeft.canStack(leftMeta, rightMeta);
             }
+
+            // Default: cukup ID sama ⇒ similar
             return true;
-        } else if (item.hasItemMeta()) {
-            Debug.log(TestCase.CARGO_INPUT_TESTING, "SlimefunUtils#isItemSimilar - item.hasItemMeta()");
-            ItemMeta itemMeta = item.getItemMeta();
-
-            if (sf_sfitem != null) {
-                String id = Slimefun.getItemDataService().getItemData(itemMeta).orElse(null);
-
-                if (id != null) {
-                    if (checkDistinction) {
-                        /*
-                         * PR #3417
-                         *
-                         * Some items can't rely on just IDs matching and will implement {@link DistinctiveItem}
-                         * in which case we want to use the method provided to compare
-                         */
-                        Optional<DistinctiveItem> optionalDistinctive = getDistinctiveItem(id);
-                        if (optionalDistinctive.isPresent()) {
-                            ItemMeta sfItemMeta = sfitem.getItemMeta();
-                            return optionalDistinctive.get().canStack(sfItemMeta, itemMeta);
-                        }
-                    }
-                    return id.equals((sf_sfitem.getId()));
-                }
-
-                ItemMeta meta = sf_sfitem.getItem().getItemMeta();
-                return equalsItemMeta(itemMeta, meta, checkLore);
-            } else if (sfitem instanceof ItemStackWrapper && sfitem.hasItemMeta()) {
-                Debug.log(TestCase.CARGO_INPUT_TESTING, "  is wrapper");
-                /*
-                 * Cargo optimization (PR #3258)
-                 *
-                 * Slimefun items may be ItemStackWrapper's in the context of cargo
-                 * so let's try to do an ID comparison before meta comparison
-                 */
-                Debug.log(TestCase.CARGO_INPUT_TESTING, "  sfitem is ItemStackWrapper - possible SF Item: {}", sfitem);
-
-                ItemMeta possibleSfItemMeta = sfitem.getItemMeta();
-                String id = Slimefun.getItemDataService().getItemData(itemMeta).orElse(null);
-                String possibleItemId = Slimefun.getItemDataService().getItemData(possibleSfItemMeta).orElse(null);
-                // Prioritize SlimefunItem id comparison over ItemMeta comparison
-                if (id != null && id.equals(possibleItemId)) {
-                    Debug.log(TestCase.CARGO_INPUT_TESTING, "  Item IDs matched!");
-
-                    /*
-                     * PR #3417
-                     *
-                     * Some items can't rely on just IDs matching and will implement {@link DistinctiveItem}
-                     * in which case we want to use the method provided to compare
-                     */
-                    Optional<DistinctiveItem> optionalDistinctive = getDistinctiveItem(id);
-                    if (optionalDistinctive.isPresent()) {
-                        return optionalDistinctive.get().canStack(possibleSfItemMeta, itemMeta);
-                    }
-                    return true;
-                } else {
-                    Debug.log(TestCase.CARGO_INPUT_TESTING, "  Item IDs don't match, checking meta {} == {} (lore: {})", itemMeta, possibleSfItemMeta, checkLore);
-                    return equalsItemMeta(itemMeta, possibleSfItemMeta, checkLore);
-                }
-            } else if (sfitem.hasItemMeta()) {
-                ItemMeta sfItemMeta = sfitem.getItemMeta();
-                Debug.log(TestCase.CARGO_INPUT_TESTING, "  Comparing meta (vanilla items?) - {} == {} (lore: {})", itemMeta, sfItemMeta, checkLore);
-                return equalsItemMeta(itemMeta, sfItemMeta, checkLore);
-            } else {
-                return false;
-            }
-        } else {
-            return !sfitem.hasItemMeta();
         }
+
+        // CASE 2: Hanya yang kanan (sfitem) itu SlimefunItem (umum terjadi ketika pembandingnya template getItem())
+        if (slimefunOfSfitem != null) {
+            // Coba baca ID Slimefun dari item kiri via item meta (jika kebetulan itu juga Slimefun tapi wrapper/strip)
+            String leftId = null;
+            if (item.hasItemMeta()) {
+                leftId = Slimefun.getItemDataService()
+                        .getItemData(item.getItemMeta())
+                        .orElse(null);
+            }
+
+            if (leftId != null) {
+                // Jika keduanya DistinctiveItem, bandingkan META AKTUAL (bukan template!)
+                if (checkDistinction) {
+                    Optional<DistinctiveItem> maybeDistinctive = getDistinctiveItem(leftId);
+                    if (maybeDistinctive.isPresent()) {
+                        ItemMeta leftMeta  = item.hasItemMeta()  ? item.getItemMeta()  : null;
+                        ItemMeta rightMeta = sfitem.hasItemMeta() ? sfitem.getItemMeta() : null;
+                        if (leftMeta == null || rightMeta == null) {
+                            return false;
+                        }
+                        return maybeDistinctive.get().canStack(rightMeta, leftMeta);
+                    }
+                }
+                return leftId.equals(slimefunOfSfitem.getId());
+            }
+
+            // Bukan SF di kiri → fallback meta compare (nama/lore/cmd), ini tetap aman karena DistinctiveItem sudah ditangani di atas
+            ItemMeta rightTemplateMeta = slimefunOfSfitem.getItem().getItemMeta();
+            ItemMeta leftActualMeta    = item.hasItemMeta() ? item.getItemMeta() : null;
+            if (leftActualMeta == null) return rightTemplateMeta == null;
+            return equalsItemMeta(leftActualMeta, rightTemplateMeta, checkLore);
+        }
+
+        // CASE 3: Tidak ada yang Slimefun → vanilla compare pakai meta
+        if (item.hasItemMeta() && sfitem.hasItemMeta()) {
+            return equalsItemMeta(item.getItemMeta(), sfitem.getItemMeta(), checkLore);
+        }
+        return !item.hasItemMeta() && !sfitem.hasItemMeta();
     }
 
     private static @Nonnull Optional<DistinctiveItem> getDistinctiveItem(@Nonnull String id) {
