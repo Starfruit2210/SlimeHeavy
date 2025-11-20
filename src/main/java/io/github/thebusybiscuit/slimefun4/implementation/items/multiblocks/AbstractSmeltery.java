@@ -72,14 +72,46 @@ abstract class AbstractSmeltery extends MultiBlockMachine {
     }
 
     private boolean canCraft(Inventory inv, List<ItemStack[]> inputs, int i) {
-        for (ItemStack expectedInput : inputs.get(i)) {
+        // Create a copy of the inventory contents to track what we've used
+        ItemStack[] inventoryCopy = new ItemStack[inv.getContents().length];
+        for (int idx = 0; idx < inv.getContents().length; idx++) {
+            if (inv.getContents()[idx] != null) {
+                inventoryCopy[idx] = inv.getContents()[idx].clone();
+            } else {
+                inventoryCopy[idx] = null;
+            }
+        }
+
+        ItemStack[] recipe = inputs.get(i);
+
+        for (ItemStack expectedInput : recipe) {
             if (expectedInput != null) {
-                for (int j = 0; j < inv.getContents().length; j++) {
-                    if (j == (inv.getContents().length - 1) && !SlimefunUtils.isItemSimilar(inv.getContents()[j], expectedInput, true)) {
-                        return false;
-                    } else if (SlimefunUtils.isItemSimilar(inv.getContents()[j], expectedInput, true)) {
-                        break;
+                boolean found = false;
+                int neededAmount = expectedInput.getAmount();
+
+                // Search through the inventory copy for matching items
+                for (int j = 0; j < inventoryCopy.length; j++) {
+                    ItemStack inventoryItem = inventoryCopy[j];
+
+                    if (inventoryItem != null && SlimefunUtils.isItemSimilar(inventoryItem, expectedInput, true, false, true)) {
+                        int available = inventoryItem.getAmount();
+
+                        if (available >= neededAmount) {
+                            // We have enough in this stack, reduce the count and continue
+                            inventoryCopy[j].setAmount(available - neededAmount);
+                            found = true;
+                            break;
+                        } else {
+                            // Use all items in this stack and continue looking
+                            neededAmount -= available;
+                            inventoryCopy[j] = null; // Mark this stack as used up
+                        }
                     }
+                }
+
+                if (!found) {
+                    // Could not find enough of this required item
+                    return false;
                 }
             }
         }

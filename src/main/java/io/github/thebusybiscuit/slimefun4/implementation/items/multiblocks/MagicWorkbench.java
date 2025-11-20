@@ -134,13 +134,29 @@ public class MagicWorkbench extends AbstractCraftingTable {
 
     private boolean isCraftable(Inventory inv, ItemStack[] recipe) {
         for (int j = 0; j < inv.getContents().length; j++) {
-            if (!SlimefunUtils.isItemSimilar(inv.getContents()[j], recipe[j], true, true, false)) {
-                if (SlimefunItem.getByItem(recipe[j]) instanceof SlimefunBackpack) {
-                    if (!SlimefunUtils.isItemSimilar(inv.getContents()[j], recipe[j], false, true, false)) {
+            ItemStack recipeItem = recipe[j];
+            ItemStack inventoryItem = inv.getContents()[j];
+
+            if (recipeItem == null) {
+                // If recipe slot is empty, inventory slot must also be empty
+                if (inventoryItem != null && inventoryItem.getType() != Material.AIR) {
+                    return false;
+                }
+            } else {
+                // If recipe slot has an item, inventory slot must have a matching item
+                if (inventoryItem == null || inventoryItem.getType() == Material.AIR) {
+                    return false;
+                }
+
+                // Check if items are similar (we only need at least 1 of each item since Magic Workbench consumes 1 of each)
+                if (!SlimefunUtils.isItemSimilar(inventoryItem, recipeItem, true, false, false)) {
+                    if (SlimefunItem.getByItem(recipeItem) instanceof SlimefunBackpack) {
+                        if (!SlimefunUtils.isItemSimilar(inventoryItem, recipeItem, false, false, false)) {
+                            return false;
+                        }
+                    } else {
                         return false;
                     }
-                } else {
-                    return false;
                 }
             }
         }
