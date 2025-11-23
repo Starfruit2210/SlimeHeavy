@@ -72,62 +72,31 @@ abstract class AbstractSmeltery extends MultiBlockMachine {
     }
 
     private boolean canCraft(Inventory inv, List<ItemStack[]> inputs, int i) {
-        // Create a copy of the inventory contents to track what we've used
-        ItemStack[] inventoryCopy = new ItemStack[inv.getContents().length];
-        for (int idx = 0; idx < inv.getContents().length; idx++) {
-            if (inv.getContents()[idx] != null) {
-                inventoryCopy[idx] = inv.getContents()[idx].clone();
-            } else {
-                inventoryCopy[idx] = null;
-            }
-        }
-
-        ItemStack[] recipe = inputs.get(i);
-
-        for (ItemStack expectedInput : recipe) {
+        for (ItemStack expectedInput : inputs.get(i)) {
             if (expectedInput != null) {
-                boolean found = false;
-                int neededAmount = expectedInput.getAmount();
+                for (int j = 0; j < inv.getContents().length; j++) {
+                    if (j == (inv.getContents().length - 1) && !SlimefunUtils.isItemSimilar(inv.getContents()[j], expectedInput, true)) {
+                        return false;
+                    } else if (SlimefunUtils.isItemSimilar(inv.getContents()[j], expectedInput, true)) {
+                        break;
+                    }
 
-                // Search through the inventory copy for matching items
-                for (int j = 0; j < inventoryCopy.length; j++) {
-                    ItemStack inventoryItem = inventoryCopy[j];
+                    return true;
+                }
 
-                    if (inventoryItem != null && SlimefunUtils.isItemSimilar(inventoryItem, expectedInput, true, false, true)) {
-                        int available = inventoryItem.getAmount();
-
-                        if (available >= neededAmount) {
-                            // We have enough in this stack, reduce the count and continue
-                            inventoryCopy[j].setAmount(available - neededAmount);
-                            found = true;
-                            break;
-                        } else {
-                            // Use all items in this stack and continue looking
-                            neededAmount -= available;
-                            inventoryCopy[j] = null; // Mark this stack as used up
+                protected void craft (Player p, Block b, Inventory inv, ItemStack[]recipe, ItemStack output, Inventory
+                outputInv){
+                    for (ItemStack removing : recipe) {
+                        if (removing != null) {
+                            InvUtils.removeItem(inv, removing.getAmount(), true, stack -> SlimefunUtils.isItemSimilar(stack, removing, true));
                         }
                     }
-                }
 
-                if (!found) {
-                    // Could not find enough of this required item
-                    return false;
+                    outputInv.addItem(output);
+                    SoundEffect.SMELTERY_CRAFT_SOUND.playAt(b);
+                    p.getWorld().playEffect(b.getLocation(), Effect.MOBSPAWNER_FLAMES, 1);
                 }
             }
         }
-
-        return true;
-    }
-
-    protected void craft(Player p, Block b, Inventory inv, ItemStack[] recipe, ItemStack output, Inventory outputInv) {
-        for (ItemStack removing : recipe) {
-            if (removing != null) {
-                InvUtils.removeItem(inv, removing.getAmount(), true, stack -> SlimefunUtils.isItemSimilar(stack, removing, true));
-            }
-        }
-
-        outputInv.addItem(output);
-        SoundEffect.SMELTERY_CRAFT_SOUND.playAt(b);
-        p.getWorld().playEffect(b.getLocation(), Effect.MOBSPAWNER_FLAMES, 1);
     }
 }
